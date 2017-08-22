@@ -1,0 +1,161 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('demo:server');
+var http = require('http');
+var querystring = require('querystring');
+var uuid = require('node-uuid');
+var url = require('url');
+var rp = require('request-promise');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+// app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app.callback());
+
+var io = require('socket.io')(server);
+
+// io.emit ==> send to all
+// socket.broadcast.emit ==> send to all except for you
+// socket.emit ==> send to you
+
+let users = [],
+    robotId = uuid.v1();
+
+io.on('connect', socket => {
+    console.log('user connect');
+    const userId = uuid.v1();
+
+    socket.on('userInfo', obj => {
+        obj.id = userId;
+        users.push(obj);
+
+        socket.emit('userId', {
+            userId: userId
+        });
+
+        io.emit('message', {
+            type: 0,
+            text: `欢迎 ${obj.name} 进入聊天室`
+        });
+    });
+
+    socket.on('message', msg => {
+        msg.id = userId;
+        io.emit('message', msg);
+
+        if (users.length === 1||msg.text.includes('@robot')) {
+            // 启用机器人聊天
+            let options = {
+                method: 'POST',
+                uri: 'http://www.tuling123.com/openapi/api',
+                body: {
+                    key: '82a45855ec0d484fbe598d67986d9de2',
+                    info: msg.text
+                },
+                json: true
+            };
+
+            rp(options).then(res => {
+                if (res.code === 100000) {
+                    io.emit('message', {
+                        type: 1,
+                        text: res.text,
+                        name: 'robot',
+                        id: robotId
+                    });
+                }
+            });
+        }
+    });
+
+    socket.on('disconnect', res => {
+        console.log('user disconnect')
+        users.forEach((user, index) => {
+            if (user.id === userId) {
+                users.splice(index, 1);
+                return false;
+            }
+        })
+    });
+});
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+    var port = parseInt(val, 10);
+
+    if (isNaN(port)) {
+        // named pipe
+        return val;
+    }
+
+    if (port >= 0) {
+        // port number
+        return port;
+    }
+
+    return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+    if (error.syscall !== 'listen') {
+        throw error;
+    }
+
+    var bind = typeof port === 'string' ?
+        'Pipe ' + port :
+        'Port ' + port;
+
+    // handle specific listen errors with friendly messages
+    switch (error.code) {
+        case 'EACCES':
+            console.error(bind + ' requires elevated privileges');
+            process.exit(1);
+            break;
+        case 'EADDRINUSE':
+            console.error(bind + ' is already in use');
+            process.exit(1);
+            break;
+        default:
+            throw error;
+    }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+    var addr = server.address();
+    var bind = typeof addr === 'string' ?
+        'pipe ' + addr :
+        'port ' + addr.port;
+    debug('Listening on ' + bind);
+}
